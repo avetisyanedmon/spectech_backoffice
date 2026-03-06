@@ -10,7 +10,9 @@ const {
 
 const app = express();
 app.set("trust proxy", process.env.TRUST_PROXY === "false" ? false : true);
-const allowedOrigins = (process.env.FRONTEND_ORIGINS || "http://localhost:4028")
+const allowedOrigins = (
+  "https://spectech-marketplace.vercel.app/" || "http://localhost:4028"
+)
   .split(",")
   .map((origin) => origin.trim().replace(/\/+$/, " "))
   .filter(Boolean);
