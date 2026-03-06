@@ -70,7 +70,9 @@ const normalizeDevPhone = (value) => {
 };
 
 const getDevTestAccounts = () => {
-  if (process.env.NODE_ENV === "production") return null;
+  if (process.env.NODE_ENV === "production" && process.env.ENABLE_TEST_ACCOUNTS_IN_PROD !== "1") {
+    return null;
+  }
 
   const accounts = [
     {
