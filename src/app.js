@@ -9,12 +9,15 @@ const {
 } = require("./middlewares/error.middleware");
 
 const app = express();
+
 app.set("trust proxy", process.env.TRUST_PROXY === "false" ? false : true);
+
 const allowedOrigins = (
-  "https://spectech-marketplace.vercel.app/" || "http://localhost:4028"
+  process.env.ALLOWED_ORIGINS ||
+  "https://spectech-marketplace.vercel.app,http://localhost:4028"
 )
   .split(",")
-  .map((origin) => origin.trim().replace(/\/+$/, " "))
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
   .filter(Boolean);
 
 const isAllowedOrigin = (origin) => {
@@ -23,13 +26,13 @@ const isAllowedOrigin = (origin) => {
   }
 
   const normalizedOrigin = origin.trim().replace(/\/+$/, "");
+
   if (allowedOrigins.includes(normalizedOrigin)) {
     return true;
   }
 
   try {
     const url = new URL(normalizedOrigin);
-    // Allow localhost/127.0.0.1 dev origins on any port.
     return (
       url.protocol === "http:" &&
       ["localhost", "127.0.0.1"].includes(url.hostname)
@@ -42,18 +45,18 @@ const isAllowedOrigin = (origin) => {
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow non-browser tools and configured/dev frontend origins.
       if (isAllowedOrigin(origin)) {
         return callback(null, true);
       }
 
-      return callback(new Error("CORS origin not allowed"));
+      return callback(null, false);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
 app.use(express.json());
 
 app.use("/api", apiRouter);
