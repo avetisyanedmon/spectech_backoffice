@@ -1,6 +1,5 @@
 const { randomUUID } = require("crypto");
-const { ordersRepository } = require("../repositories/orders.repository");
-const { bidsRepository } = require("../repositories/bids.repository");
+const { ordersRepository, bidsRepository } = require("../repositories");
 const {
   EQUIPMENT_CATEGORY_MAP,
   PRICING_UNIT_MAP,
@@ -78,7 +77,7 @@ const buildAddress = (payload) => {
   return `${payload.street.trim()}, д. ${payload.houseNumber.trim()}`;
 };
 
-const createOrder = (payload, creatorId) => {
+const createOrder = async (payload, creatorId) => {
   const equipmentCategory = mapEnumValue(
     payload.equipmentCategory,
     EQUIPMENT_CATEGORY_MAP,
@@ -118,11 +117,11 @@ const createOrder = (payload, creatorId) => {
     updatedAt: createdAtDate.toISOString()
   };
 
-  return ordersRepository.create(normalizedOrder);
+  return await ordersRepository.create(normalizedOrder);
 };
 
-const getOrders = (user, viewMode = ORDER_VIEW_MODES.ALL) => {
-  const allOrders = ordersRepository.findAll();
+const getOrders = async (user, viewMode = ORDER_VIEW_MODES.ALL) => {
+  const allOrders = await ordersRepository.findAll();
 
   if (viewMode === ORDER_VIEW_MODES.MINE) {
     return allOrders.filter((order) => order.creatorId === user.id);
@@ -133,7 +132,7 @@ const getOrders = (user, viewMode = ORDER_VIEW_MODES.ALL) => {
   }
 
   if (viewMode === ORDER_VIEW_MODES.PENDING) {
-    const orderIdsWithBid = bidsRepository.findOrderIdsByContractorId(user.id);
+    const orderIdsWithBid = await bidsRepository.findOrderIdsByContractorId(user.id);
     const orderIdSet = new Set(orderIdsWithBid);
     return allOrders.filter(
       (order) => order.creatorId !== user.id && orderIdSet.has(order.id)

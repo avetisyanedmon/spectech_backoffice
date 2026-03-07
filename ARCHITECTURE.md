@@ -1,0 +1,496 @@
+# SpecTech Backoffice Architecture
+
+## System Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Frontend (React)                         │
+│              https://spectech-marketplace.vercel.app         │
+└────────────────────────┬────────────────────────────────────┘
+                         │ HTTPS/REST API
+                         │ JWT Authentication
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Backend (Express.js)                        │
+│              https://spectech-backoffice.onrender.com        │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              API Routes Layer                        │  │
+│  │  /api/auth  /api/orders  /api/equipment  /api/bids  │  │
+│  └────────────────────┬─────────────────────────────────┘  │
+│                       │                                      │
+│  ┌────────────────────▼─────────────────────────────────┐  │
+│  │              Middlewares                             │  │
+│  │  - Authentication (JWT)                              │  │
+│  │  - Authorization (Role-based)                        │  │
+│  │  - Error Handling                                    │  │
+│  │  - CORS                                              │  │
+│  └────────────────────┬─────────────────────────────────┘  │
+│                       │                                      │
+│  ┌────────────────────▼─────────────────────────────────┐  │
+│  │              Controllers                             │  │
+│  │  - Request validation                                │  │
+│  │  - Response serialization                            │  │
+│  │  - HTTP status codes                                 │  │
+│  └────────────────────┬─────────────────────────────────┘  │
+│                       │                                      │
+│  ┌────────────────────▼─────────────────────────────────┐  │
+│  │              Services (Business Logic)               │  │
+│  │  - Order management                                  │  │
+│  │  - Equipment management                              │  │
+│  │  - Bid processing                                    │  │
+│  │  - Authentication logic                              │  │
+│  └────────────────────┬─────────────────────────────────┘  │
+│                       │                                      │
+│  ┌────────────────────▼─────────────────────────────────┐  │
+│  │         Repository Factory (Database Abstraction)    │  │
+│  │                                                       │  │
+│  │         if USE_SUPABASE === "true"                   │  │
+│  │              ├─ YES → Supabase Repos                 │  │
+│  │              └─ NO  → SQLite Repos                   │  │
+│  └──────────────┬─────────────────┬────────────────────┘  │
+│                 │                 │                         │
+└─────────────────┼─────────────────┼─────────────────────────┘
+                  │                 │
+        ┌─────────▼──────┐  ┌──────▼──────────┐
+        │  SQLite (Dev)  │  │ Supabase (Prod) │
+        │                │  │                 │
+        │  Local File    │  │  PostgreSQL     │
+        │  ./data/app.db │  │  Cloud Hosted   │
+        └────────────────┘  └─────────────────┘
+```
+
+## Database Architecture
+
+### Dual Database Support
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                  Application Layer                        │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │         Repository Interface (Consistent API)      │ │
+│  │                                                     │ │
+│  │  - create(data)                                    │ │
+│  │  - findAll()                                       │ │
+│  │  - findById(id)                                    │ │
+│  │  - findByOwnerId(id)                               │ │
+│  │  - findByCreatorId(id)                             │ │
+│  └──────────────┬──────────────────┬──────────────────┘ │
+│                 │                  │                     │
+│    ┌────────────▼──────────┐  ┌───▼──────────────────┐ │
+│    │  SQLite Repositories  │  │ Supabase Repositories│ │
+│    │                       │  │                      │ │
+│    │  - Synchronous API    │  │  - Async/Await API   │ │
+│    │  - better-sqlite3     │  │  - @supabase/js      │ │
+│    │  - Local file         │  │  - REST API          │ │
+│    └───────────┬───────────┘  └──────────┬───────────┘ │
+└────────────────┼──────────────────────────┼─────────────┘
+                 │                          │
+         ┌───────▼────────┐         ┌──────▼──────────┐
+         │  SQLite File   │         │  Supabase API   │
+         │                │         │                 │
+         │  app.db        │         │  PostgreSQL     │
+         │  (Local)       │         │  (Cloud)        │
+         └────────────────┘         └─────────────────┘
+```
+
+## Data Flow
+
+### Creating an Order
+
+```
+1. Frontend
+   │
+   └─→ POST /api/orders
+       Headers: { Authorization: Bearer <JWT> }
+       Body: { equipmentCategory, city, address, ... }
+       │
+       ▼
+2. Backend - Route Handler
+   │
+   └─→ authenticate middleware → Verify JWT
+       │
+       └─→ authorizeRoles middleware → Check user role
+           │
+           └─→ asyncHandler → Wrap async controller
+               │
+               ▼
+3. Controller (orders.controller.js)
+   │
+   └─→ validateCreateOrderPayload() → Validate input
+       │
+       └─→ createOrder(payload, userId) → Call service
+           │
+           ▼
+4. Service (orders.service.js)
+   │
+   └─→ Business logic:
+       - Normalize data
+       - Generate UUID
+       - Calculate expiry
+       │
+       └─→ ordersRepository.create(order)
+           │
+           ▼
+5. Repository Factory (repositories/index.js)
+   │
+   ├─→ if USE_SUPABASE === "true"
+   │   └─→ orders.repository.supabase.js
+   │       └─→ supabase.from('orders').insert()
+   │           │
+   │           └─→ Supabase PostgreSQL (Cloud)
+   │
+   └─→ else
+       └─→ orders.repository.js
+           └─→ db.prepare().run()
+               │
+               └─→ SQLite (Local File)
+```
+
+## Authentication Flow
+
+```
+┌──────────────┐
+│   Frontend   │
+└──────┬───────┘
+       │
+       │ 1. POST /api/auth/start
+       │    { phone: "+79990000000" }
+       ▼
+┌──────────────────────────────────┐
+│  Backend - Auth Controller       │
+│                                  │
+│  1. Validate phone number        │
+│  2. Generate OTP code            │
+│  3. Store in OTP storage         │
+│  4. Send SMS via SMS.ru          │
+│  5. Return requestId             │
+└──────┬───────────────────────────┘
+       │
+       │ Response: { requestId: "..." }
+       ▼
+┌──────────────┐
+│   Frontend   │
+│              │
+│  User enters │
+│  OTP code    │
+└──────┬───────┘
+       │
+       │ 2. POST /api/auth/verify
+       │    { requestId, code: "111111" }
+       ▼
+┌──────────────────────────────────┐
+│  Backend - Auth Controller       │
+│                                  │
+│  1. Validate requestId           │
+│  2. Verify OTP code              │
+│  3. Check expiration             │
+│  4. Generate JWT token           │
+│  5. Return token + user data     │
+└──────┬───────────────────────────┘
+       │
+       │ Response: { token: "eyJ...", user: {...} }
+       ▼
+┌──────────────┐
+│   Frontend   │
+│              │
+│  Store token │
+│  in memory   │
+└──────┬───────┘
+       │
+       │ 3. Subsequent requests
+       │    Headers: { Authorization: Bearer <token> }
+       ▼
+┌──────────────────────────────────┐
+│  Backend - Auth Middleware       │
+│                                  │
+│  1. Extract token from header    │
+│  2. Verify JWT signature         │
+│  3. Decode user data             │
+│  4. Attach to req.user           │
+│  5. Continue to controller       │
+└──────────────────────────────────┘
+```
+
+## Repository Pattern
+
+### SQLite Implementation
+
+```javascript
+// src/repositories/orders.repository.js
+class OrdersRepository {
+  create(order) {
+    // Synchronous operation
+    db.prepare(`INSERT INTO orders ...`).run(order);
+    return order;
+  }
+  
+  findAll() {
+    // Synchronous operation
+    const rows = db.prepare('SELECT * FROM orders').all();
+    return rows.map(this.#mapRow);
+  }
+}
+```
+
+### Supabase Implementation
+
+```javascript
+// src/repositories/orders.repository.supabase.js
+class OrdersRepository {
+  async create(order) {
+    // Asynchronous operation
+    const { data, error } = await supabase
+      .from('orders')
+      .insert(order)
+      .select()
+      .single();
+    
+    if (error) throw new Error(error.message);
+    return this.#mapRow(data);
+  }
+  
+  async findAll() {
+    // Asynchronous operation
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw new Error(error.message);
+    return data.map(this.#mapRow);
+  }
+}
+```
+
+## Database Schema
+
+### Tables
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                        orders                            │
+├─────────────────────────────────────────────────────────┤
+│ id (UUID/TEXT)                    PRIMARY KEY           │
+│ creator_id (TEXT)                 NOT NULL              │
+│ equipment_category (TEXT)         NOT NULL              │
+│ city (TEXT)                       NOT NULL              │
+│ address (TEXT)                    NOT NULL              │
+│ payment_types (TEXT/JSONB)        NOT NULL              │
+│ pricing_unit (TEXT)               NOT NULL              │
+│ work_volume (REAL)                NOT NULL              │
+│ start_date_time (TEXT/TIMESTAMPTZ) NOT NULL            │
+│ duration_hours (INTEGER)          NOT NULL              │
+│ expires_at (TEXT/TIMESTAMPTZ)     NOT NULL              │
+│ description (TEXT)                NOT NULL              │
+│ status (TEXT)                     NOT NULL              │
+│ bid_count (INTEGER)               DEFAULT 0             │
+│ created_at (TEXT/TIMESTAMPTZ)     NOT NULL              │
+│ updated_at (TEXT/TIMESTAMPTZ)     NOT NULL              │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           │ 1:N
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                         bids                             │
+├─────────────────────────────────────────────────────────┤
+│ id (UUID/TEXT)                    PRIMARY KEY           │
+│ order_id (UUID/TEXT)              FOREIGN KEY → orders  │
+│ contractor_id (TEXT)              NOT NULL              │
+│ price (REAL)                      NOT NULL              │
+│ delivery_price (REAL)             DEFAULT 0             │
+│ payment_type (TEXT)               NOT NULL              │
+│ comment (TEXT)                    NULL                  │
+│ equipment_id (UUID/TEXT)          NULL                  │
+│ equipment_name (TEXT)             NULL                  │
+│ equipment_category (TEXT)         NULL                  │
+│ created_at (TEXT/TIMESTAMPTZ)     NOT NULL              │
+│ updated_at (TEXT/TIMESTAMPTZ)     NOT NULL              │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│                      equipment                           │
+├─────────────────────────────────────────────────────────┤
+│ id (UUID/TEXT)                    PRIMARY KEY           │
+│ owner_id (TEXT)                   NOT NULL              │
+│ name (TEXT)                       NOT NULL              │
+│ category (TEXT)                   NOT NULL              │
+│ characteristics (TEXT/JSONB)      NOT NULL              │
+│ additional_equipment (TEXT)       NULL                  │
+│ photos (TEXT/JSONB)               NOT NULL              │
+│ created_at (TEXT/TIMESTAMPTZ)     NOT NULL              │
+│ updated_at (TEXT/TIMESTAMPTZ)     NOT NULL              │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Indexes
+
+```
+orders:
+  - idx_orders_creator_created_at (creator_id, created_at DESC)
+  - idx_orders_status (status)
+  - idx_orders_expires_at (expires_at)
+
+equipment:
+  - idx_equipment_owner_created_at (owner_id, created_at DESC)
+  - idx_equipment_category (category)
+
+bids:
+  - idx_bids_order_id (order_id)
+  - idx_bids_contractor_id (contractor_id)
+  - idx_bids_equipment_id (equipment_id)
+```
+
+## Deployment Architecture
+
+### Production Setup
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Internet Users                         │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         │ HTTPS
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Vercel (Frontend)                       │
+│              React SPA + Static Assets                   │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         │ REST API (HTTPS)
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│              Render/Railway (Backend)                    │
+│                                                          │
+│  ┌────────────────────────────────────────────────┐    │
+│  │         Express.js Application                 │    │
+│  │  - Auto-scaling                                │    │
+│  │  - Health checks                               │    │
+│  │  - Environment variables                       │    │
+│  └────────────────────────────────────────────────┘    │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         │ PostgreSQL Protocol
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Supabase (Database)                     │
+│                                                          │
+│  ┌────────────────────────────────────────────────┐    │
+│  │         PostgreSQL 15                          │    │
+│  │  - Automatic backups                           │    │
+│  │  - Connection pooling                          │    │
+│  │  - Real-time capabilities                      │    │
+│  └────────────────────────────────────────────────┘    │
+│                                                          │
+│  ┌────────────────────────────────────────────────┐    │
+│  │         Storage                                │    │
+│  │  - File uploads (future)                       │    │
+│  └────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│                  SMS.ru (SMS Gateway)                    │
+│              OTP Code Delivery                           │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│              Redis (Optional - Future)                   │
+│              OTP Storage + Caching                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Security Layers
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Layer 1: Network Security                               │
+│  - HTTPS/TLS encryption                                  │
+│  - CORS restrictions                                     │
+│  - Rate limiting (future)                                │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│  Layer 2: Authentication                                 │
+│  - Phone-based OTP                                       │
+│  - JWT tokens                                            │
+│  - Token expiration                                      │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│  Layer 3: Authorization                                  │
+│  - Role-based access control                             │
+│  - Customer vs Contractor permissions                    │
+│  - Endpoint-level authorization                          │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│  Layer 4: Input Validation                               │
+│  - Joi schema validation                                 │
+│  - Type checking                                         │
+│  - SQL injection prevention                              │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│  Layer 5: Database Security                              │
+│  - Service Role Key (backend only)                       │
+│  - Prepared statements                                   │
+│  - Row Level Security (future)                           │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Technology Stack
+
+### Backend
+- **Runtime**: Node.js 18+
+- **Framework**: Express.js 5.2.1
+- **Databases**: 
+  - SQLite (better-sqlite3 12.6.2)
+  - PostgreSQL (via Supabase 2.98.0)
+- **Authentication**: jsonwebtoken 9.0.2
+- **Validation**: Joi 18.0.2
+- **API Docs**: Swagger UI
+
+### Frontend
+- **Framework**: React 18
+- **Build Tool**: Vite
+- **State**: Redux Toolkit
+- **Routing**: React Router v6
+- **Styling**: Tailwind CSS
+
+### Infrastructure
+- **Frontend Hosting**: Vercel
+- **Backend Hosting**: Render/Railway
+- **Database**: Supabase (PostgreSQL)
+- **SMS Gateway**: SMS.ru
+- **Caching**: Redis (optional)
+
+## Monitoring & Observability
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Application Metrics                     │
+│                                                          │
+│  Backend (Render/Railway)                                │
+│  ├─ Request rate                                         │
+│  ├─ Response times                                       │
+│  ├─ Error rates                                          │
+│  └─ CPU/Memory usage                                     │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│                  Database Metrics                        │
+│                                                          │
+│  Supabase Dashboard                                      │
+│  ├─ Query performance                                    │
+│  ├─ Connection count                                     │
+│  ├─ Storage usage                                        │
+│  └─ Slow query log                                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+**Last Updated**: March 7, 2026  
+**Version**: 1.0.0  
+**Status**: Production Ready

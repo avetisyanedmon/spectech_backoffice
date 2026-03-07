@@ -1,12 +1,12 @@
 const { validateCreateBidPayload } = require("../validators/bids.validator");
 const { createBid } = require("../services/bids.service");
 
-const createBidController = (req, res) => {
+const createBidController = async (req, res) => {
   const orderId = req.params.orderId;
   const payload = validateCreateBidPayload(req.body);
   const contractorId = req.user.id;
 
-  const bid = createBid(
+  const bid = await createBid(
     {
       orderId,
       ...payload

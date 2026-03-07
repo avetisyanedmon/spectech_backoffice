@@ -1,13 +1,12 @@
 const { randomUUID } = require("crypto");
 const { HttpError } = require("../utils/httpError");
-const { ordersRepository } = require("../repositories/orders.repository");
-const { bidsRepository } = require("../repositories/bids.repository");
+const { ordersRepository, bidsRepository } = require("../repositories");
 
-const createBid = (payload, contractorId) => {
+const createBid = async (payload, contractorId) => {
   const { orderId, price, deliveryPrice, paymentType, comment, equipmentId, equipmentName, equipmentCategory } =
     payload;
 
-  const order = ordersRepository.findById(orderId);
+  const order = await ordersRepository.findById(orderId);
   if (!order) {
     throw new HttpError(404, "ORDER_NOT_FOUND", "Order not found");
   }
@@ -25,7 +24,7 @@ const createBid = (payload, contractorId) => {
     throw new HttpError(400, "ORDER_EXPIRED", "Order has expired");
   }
 
-  const existingBids = bidsRepository.findByOrderId(orderId);
+  const existingBids = await bidsRepository.findByOrderId(orderId);
   const alreadyBid = existingBids.some((b) => b.contractorId === contractorId);
   if (alreadyBid) {
     throw new HttpError(400, "ALREADY_BID", "You have already submitted a bid for this order");
@@ -68,8 +67,8 @@ const createBid = (payload, contractorId) => {
     updatedAt: now
   };
 
-  bidsRepository.create(bid);
-  ordersRepository.incrementBidCount(orderId);
+  await bidsRepository.create(bid);
+  await ordersRepository.incrementBidCount(orderId);
 
   return {
     ...bid,

@@ -1,5 +1,5 @@
 const { randomUUID } = require("crypto");
-const { equipmentRepository } = require("../repositories/equipment.repository");
+const { equipmentRepository } = require("../repositories");
 
 const serializeInput = (payload) => ({
   name: payload.name.trim(),
@@ -11,11 +11,11 @@ const serializeInput = (payload) => ({
     : []
 });
 
-const createEquipment = (payload, ownerId) => {
+const createEquipment = async (payload, ownerId) => {
   const normalized = serializeInput(payload);
   const now = new Date().toISOString();
 
-  return equipmentRepository.create({
+  return await equipmentRepository.create({
     id: randomUUID(),
     ownerId,
     name: normalized.name,
@@ -28,9 +28,9 @@ const createEquipment = (payload, ownerId) => {
   });
 };
 
-const getEquipmentForUser = (ownerId) =>
-  equipmentRepository
-    .findByOwnerId(ownerId)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+const getEquipmentForUser = async (ownerId) => {
+  const items = await equipmentRepository.findByOwnerId(ownerId);
+  return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+};
 
 module.exports = { createEquipment, getEquipmentForUser };

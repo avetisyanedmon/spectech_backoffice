@@ -13,9 +13,9 @@ const serializeEquipment = (item) => ({
   updatedAt: item.updatedAt
 });
 
-const createEquipmentController = (req, res) => {
+const createEquipmentController = async (req, res) => {
   const payload = validateCreateEquipmentPayload(req.body);
-  const equipment = createEquipment(payload, req.user.id);
+  const equipment = await createEquipment(payload, req.user.id);
 
   return res.status(201).json({
     success: true,
@@ -23,8 +23,8 @@ const createEquipmentController = (req, res) => {
   });
 };
 
-const getEquipmentController = (req, res) => {
-  const items = getEquipmentForUser(req.user.id);
+const getEquipmentController = async (req, res) => {
+  const items = await getEquipmentForUser(req.user.id);
 
   return res.status(200).json({
     success: true,
